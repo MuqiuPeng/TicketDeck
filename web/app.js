@@ -18,6 +18,7 @@ const view = {
 };
 let data = { projects: [], statuses: [], priorities: [], types: [] };
 let selected = params.get("ticket"); // "<project path>#<id>"
+let reportDate = params.get("report"); // "" = newest, null = closed
 let lastStatus = null; // key → status, to notice tickets reaching review
 
 // Untrusted text: tickets are written by agents. Raw HTML in markdown is shown as text.
@@ -201,7 +202,9 @@ function card(t) {
 function renderDetail() {
   const t = allTickets().find((x) => key(x) === selected);
   const pane = $("#detail");
+  pane.classList.remove("report");
   if (!t) {
+    if (reportDate != null) return renderReport();
     pane.hidden = true;
     return;
   }
@@ -287,7 +290,54 @@ function renderDetail() {
   pane.scrollTop = scroll;
 }
 
+async function renderReport() {
+  const pane = $("#detail");
+  const [{ dates }, rep] = await Promise.all([
+    fetch("/api/reports").then((r) => r.json()),
+    fetch(`/api/report${reportDate ? `?date=${reportDate}` : ""}`).then((r) => (r.ok ? r.json() : null)),
+  ]);
+  if (reportDate == null) return; // closed while loading
+  pane.hidden = false;
+  pane.classList.add("report");
+  const body = h("div", { class: "md" });
+  if (rep) {
+    body.innerHTML = marked.parse(rep.markdown);
+    for (const a of body.querySelectorAll("a")) if (!/^(https?:|mailto:)/i.test(a.getAttribute("href") ?? "")) a.removeAttribute("href");
+    for (const img of body.querySelectorAll("img")) img.replaceWith(img.alt ?? "");
+  } else body.append(h("p", {}, "No report yet. One is written every morning at 8:00, or run `ticketdeck report --save`."));
+  pane.replaceChildren(
+    h(
+      "div",
+      { class: "head" },
+      h("strong", {}, "Daily report"),
+      dates.length > 0 &&
+        h(
+          "select",
+          { onchange: (e) => ((reportDate = e.target.value), renderReport(), syncURL()) },
+          dates.map((d) => h("option", { value: d, selected: d === (rep?.date ?? reportDate) }, d)),
+        ),
+      h("button", { class: "ghost x", onclick: () => closeReport(), title: "Close (Esc)" }, "✕"),
+    ),
+    body,
+  );
+}
+
+function openReport() {
+  selected = null;
+  reportDate = "";
+  renderBoard();
+  renderDetail();
+  syncURL();
+}
+
+function closeReport() {
+  reportDate = null;
+  renderDetail();
+  syncURL();
+}
+
 function select(k) {
+  if (k) reportDate = null;
   selected = k;
   renderBoard();
   renderDetail();
@@ -305,6 +355,7 @@ function syncURL() {
     if (v) p.set(k, v);
   if (view.closed) p.set("closed", "1");
   if (selected) p.set("ticket", selected);
+  if (reportDate != null) p.set("report", reportDate);
   const qs = p.toString();
   history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
 }
@@ -384,6 +435,7 @@ $("#f-label").onchange = (e) => ((view.label = e.target.value), render());
 $("#f-search").oninput = (e) => ((view.q = e.target.value), renderBoard(), syncURL());
 $("#f-closed").onchange = (e) => ((view.closed = e.target.checked), load());
 $("#new").onclick = openNew;
+$("#report").onclick = () => (reportDate != null ? closeReport() : openReport());
 $("#new-form").addEventListener("submit", (e) => {
   if (e.submitter?.value !== "create") return;
   e.preventDefault();
@@ -398,10 +450,11 @@ if ("Notification" in window && Notification.permission === "default") {
 
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
-  if (e.key === "Escape" && !$("#new-dialog").open) select(null);
+  if (e.key === "Escape" && !$("#new-dialog").open) (reportDate != null && !selected ? closeReport() : select(null));
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n") (e.preventDefault(), openNew());
   if (e.key === "/") (e.preventDefault(), $("#f-search").focus());
+  if (e.key === "r") (e.preventDefault(), reportDate != null ? closeReport() : openReport());
 });
 
 function connect() {

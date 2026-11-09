@@ -12,6 +12,7 @@ import { boardState, expand, globalConfig, knownProjects, roots, saveCliLocation
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { serve } from "./server.js";
+import { buildReport, listReports, localDate, readReport, saveReport } from "./report.js";
 
 const HELP = `ticketdeck — tickets your coding agent manages, stored in .tickets/
 
@@ -28,6 +29,8 @@ Usage:
   ticketdeck check <id> <n> [on|off]        tick checklist item n (1-based)
   ticketdeck state [--closed]               every project's tickets as JSON (for TabStack)
   ticketdeck serve [--port 4477] [--open]   the web board on localhost
+  ticketdeck report [--save] [--hours 24]   daily report of every project's tickets
+  ticketdeck reports [--show <date>]        saved reports, newest first
   ticketdeck where                          print the project folder and tickets path
 
 Statuses:   ${STATUSES.join(", ")}
@@ -187,6 +190,24 @@ function main(argv: string[]): number {
     case "state": {
       const { values } = parseArgs({ args: rest, options: { closed: { type: "boolean" }, json: { type: "boolean" } } });
       console.log(JSON.stringify(boardState(values.closed)));
+      return 0;
+    }
+
+    case "report": {
+      const { values } = parseArgs({ args: rest, options: { save: { type: "boolean" }, hours: { type: "string" } } });
+      const md = buildReport(new Date(), Number(values.hours ?? 24));
+      if (values.save) console.log(saveReport(md, localDate()));
+      else process.stdout.write(md);
+      return 0;
+    }
+
+    case "reports": {
+      const { values } = parseArgs({ args: rest, options: { show: { type: "string" } } });
+      if (values.show) {
+        const md = readReport(values.show);
+        if (md == null) throw new TicketError(`No report for ${values.show}.`);
+        process.stdout.write(md);
+      } else console.log(listReports().join("\n") || "No reports yet.");
       return 0;
     }
 

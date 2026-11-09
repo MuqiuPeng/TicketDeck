@@ -64,3 +64,33 @@ test("board: state, updates, checklist, create, live events and request guards",
   );
   assert.equal(status, 403);
 });
+
+test("daily report: sections, activity window, saved reports over the API", { timeout: 20000 }, async (t) => {
+  const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ticketdeck-report-")));
+  process.env.TICKETDECK_HOME = path.join(parent, ".home");
+  const root = path.join(parent, "Proj");
+  fs.mkdirSync(root);
+  const store = new Store(root);
+  store.init();
+  store.create({ title: "Needs review", labels: [] }, "local_a");
+  store.update("1", { status: "review" }, "local_a");
+  store.create({ title: "Pick an approach", priority: "P1", labels: ["decision"] }, "local_a");
+  fs.mkdirSync(process.env.TICKETDECK_HOME, { recursive: true });
+  fs.writeFileSync(path.join(process.env.TICKETDECK_HOME, "projects.json"), JSON.stringify({ projects: [{ path: root, lastUsed: new Date().toISOString() }] }));
+
+  const { buildReport, saveReport, localDate } = await import("../dist/report.js");
+  const md = buildReport(new Date());
+  for (const h of ["# Daily report", "## Needs you", "## Last 24 hours", "## In progress", "## Top priorities", "## By project"]) assert.ok(md.includes(h), h);
+  assert.match(md, /Ready for review \(1\)[\s\S]*\*\*Proj\*\* T-0001 Needs review/);
+  assert.match(md, /Waiting on your decision or action \(1\)[\s\S]*P1 \*\*Proj\*\* T-0002/);
+  assert.match(md, /\*\*Proj\*\* — 2 new, 1 updates/);
+  assert.match(buildReport(new Date(Date.now() + 3 * 86_400_000)), /No ticket activity/);
+
+  saveReport(md, localDate());
+  const board = await serve({ port: 0 });
+  t.after(() => board.close());
+  const base = board.url.replace(/\/$/, "");
+  assert.deepEqual((await (await fetch(`${base}/api/reports`)).json()).dates, [localDate()]);
+  assert.match((await (await fetch(`${base}/api/report`)).json()).markdown, /# Daily report/);
+  assert.equal((await fetch(`${base}/api/report?date=../../etc/passwd`)).status, 404);
+});

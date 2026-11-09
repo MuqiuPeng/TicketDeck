@@ -68,6 +68,16 @@ every project. Output lines are tagged `[Project]`.
   reaches review. Updates live from file changes. Listens on 127.0.0.1 only and refuses
   other Host/Origin headers.
 
+## Daily report
+
+`ticketdeck report --save` writes a markdown digest of every project to
+`~/.ticketdeck/reports/<date>.md`: what needs you (tickets in review, decisions and actions
+waiting on you), the last 24 hours of activity, work in progress (stale after 3 days), top
+priorities and per-project counts. A Claude scheduled task (`ticketdeck-daily-report`, 8:00
+daily) runs it, then adds a summary and the unfinished work of yesterday's sessions that no
+ticket covers. Read it in TabStack's ⌃⌥T panel (Tab to **Report**, ←→ for other days) or on
+the board (**Daily report**, `R`).
+
 ## MCP tools
 
 | Tool | |
@@ -91,6 +101,8 @@ ticketdeck done <id>
 ticketdeck check <id> <n> [on|off]
 ticketdeck state [--closed]            JSON, for TabStack
 ticketdeck serve [--port 4477] [--open]
+ticketdeck report [--save] [--hours 24]
+ticketdeck reports [--show <date>]
 ticketdeck projects
 ```
 

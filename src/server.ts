@@ -12,6 +12,7 @@ import {
   type TicketPatch,
 } from "./core.js";
 import { boardState, knownProjects, ticketJSON } from "./projects.js";
+import { listReports, readReport, reportsDir } from "./report.js";
 
 const ACTOR = "user";
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
@@ -54,6 +55,12 @@ export function serve(opts: ServeOptions): Promise<Board> {
       }
       if (req.method === "GET" && url.pathname === "/api/state")
         return send(res, 200, state(url.searchParams.get("closed") === "1"));
+      if (req.method === "GET" && url.pathname === "/api/reports") return send(res, 200, { dates: listReports() });
+      if (req.method === "GET" && url.pathname === "/api/report") {
+        const date = url.searchParams.get("date") ?? listReports()[0] ?? "";
+        const markdown = readReport(date);
+        return markdown == null ? send(res, 404, { error: "no report" }) : send(res, 200, { date, markdown });
+      }
       if (req.method === "GET" && url.pathname === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
         res.write(`event: hello\ndata: {}\n\n`);
@@ -198,7 +205,7 @@ class Watcher {
   }
 
   private sync(): void {
-    const dirs = new Set<string>([ticketdeckHome()]);
+    const dirs = new Set<string>([ticketdeckHome(), reportsDir()]);
     for (const p of knownProjects()) {
       dirs.add(path.join(p, TICKETS_DIR));
       dirs.add(path.join(p, TICKETS_DIR, "archive"));
