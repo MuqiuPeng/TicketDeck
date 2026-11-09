@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Store, TICKETS_DIR, TicketError, projectRoot, registeredProjects, ticketdeckHome } from "./core.js";
+import { Store, TICKETS_DIR, TicketError, projectRoot, registeredProjects, ticketdeckHome, type Ticket } from "./core.js";
 
 export interface GlobalConfig {
   /** Folders whose sub-folders are projects, e.g. ~/projects. */
@@ -141,4 +141,31 @@ export function pickProject(input: ResolveInput, last: string | null, cwd = proc
 /** Whether a folder looks like a code project we may create .tickets/ in. */
 export function isRepo(root: string): boolean {
   return fs.existsSync(path.join(root, ".git"));
+}
+
+// MARK: Board state, shared by `ticketdeck state --json` (TabStack's panel) and the web board
+
+export function ticketJSON(t: Ticket) {
+  const { path: file, ...rest } = t;
+  return { ...rest, file };
+}
+
+/** Every project with tickets. Done tickets stay until archived; `closed` adds dropped and archived. */
+export function boardState(closed = false) {
+  return {
+    projects: knownProjects().map((root) => ({
+      name: path.basename(root),
+      path: root,
+      tickets: new Store(root)
+        .list(closed ? { includeClosed: true } : { status: ["todo", "doing", "review", "done"] })
+        .map(ticketJSON),
+    })),
+  };
+}
+
+/** Where the CLI lives, for apps that drive it (TabStack). Written by `ticketdeck setup`. */
+export function saveCliLocation(cli: string): void {
+  const file = path.join(ticketdeckHome(), "cli.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ node: process.execPath, cli }, null, 2) + "\n");
 }

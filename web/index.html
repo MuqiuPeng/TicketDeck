@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TicketDeck</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">▤</span>
+      <span>TicketDeck</span>
+      <span id="live" class="live" title="Live updates"></span>
+    </div>
+    <div class="filters">
+      <select id="f-project" aria-label="Project"></select>
+      <select id="f-type" aria-label="Type"></select>
+      <select id="f-label" aria-label="Label"></select>
+      <input id="f-search" type="search" placeholder="Search  /" aria-label="Search">
+      <label class="check"><input id="f-closed" type="checkbox"> Show closed</label>
+    </div>
+    <div class="actions">
+      <button id="notify" class="ghost" hidden>Notify me</button>
+      <button id="new" class="primary">New ticket <kbd>N</kbd></button>
+    </div>
+  </header>
+
+  <main id="board" class="board" aria-live="polite"></main>
+
+  <aside id="detail" class="detail" hidden aria-label="Ticket details"></aside>
+
+  <dialog id="new-dialog">
+    <form id="new-form" method="dialog">
+      <h2>New ticket</h2>
+      <label>Project <select name="project" required></select></label>
+      <label>Title <input name="title" required autocomplete="off"></label>
+      <div class="row">
+        <label>Type <select name="type"></select></label>
+        <label>Priority <select name="priority"></select></label>
+        <label class="grow">Labels <input name="labels" placeholder="comma, separated" autocomplete="off"></label>
+      </div>
+      <label>Description <textarea name="body" rows="8" placeholder="Context, then acceptance criteria:&#10;- [ ] …"></textarea></label>
+      <div id="dupes" class="dupes" hidden></div>
+      <div class="buttons">
+        <button value="cancel" formnovalidate class="ghost">Cancel</button>
+        <button id="create" value="create" class="primary">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

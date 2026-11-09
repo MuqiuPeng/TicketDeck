@@ -8,7 +8,10 @@ import {
   type Priority, type Status, type TicketPatch, type TicketType,
 } from "./core.js";
 import { installGlobalMcp, installMcp, installRules } from "./install.js";
-import { expand, globalConfig, knownProjects, roots, saveGlobalConfig } from "./projects.js";
+import { boardState, expand, globalConfig, knownProjects, roots, saveCliLocation, saveGlobalConfig, ticketJSON } from "./projects.js";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { serve } from "./server.js";
 
 const HELP = `ticketdeck — tickets your coding agent manages, stored in .tickets/
 
@@ -22,6 +25,9 @@ Usage:
   ticketdeck set <id> key=value...          status, priority, type, title, labels, depends_on, files
   ticketdeck log <id> "note"
   ticketdeck done <id>                      shorthand for set <id> status=done
+  ticketdeck check <id> <n> [on|off]        tick checklist item n (1-based)
+  ticketdeck state [--closed]               every project's tickets as JSON (for TabStack)
+  ticketdeck serve [--port 4477] [--open]   the web board on localhost
   ticketdeck where                          print the project folder and tickets path
 
 Statuses:   ${STATUSES.join(", ")}
@@ -49,6 +55,7 @@ function main(argv: string[]): number {
         cfg.roots = [...new Set([...cfg.roots, ...values.root.map(expand)])];
         saveGlobalConfig(cfg);
       }
+      saveCliLocation(fileURLToPath(import.meta.url));
       const r = installGlobalMcp();
       if (r.ok) console.log("Registered the ticketdeck MCP server for your user (claude mcp, scope user).");
       else console.log(`Could not find the claude CLI. Run this yourself:\n  ${r.command}`);
@@ -176,6 +183,43 @@ function main(argv: string[]): number {
     case "log":
       console.log(summaryLine(store.log(need(rest[0], "id"), rest.slice(1).join(" "), ACTOR)));
       return 0;
+
+    case "state": {
+      const { values } = parseArgs({ args: rest, options: { closed: { type: "boolean" }, json: { type: "boolean" } } });
+      console.log(JSON.stringify(boardState(values.closed)));
+      return 0;
+    }
+
+    case "serve": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { port: { type: "string", short: "p" }, open: { type: "boolean" } },
+      });
+      const port = Number(values.port ?? process.env.TICKETDECK_PORT ?? 4477);
+      serve({ port }).then(
+        (board) => {
+          console.log(`TicketDeck board: ${board.url}  (Ctrl-C to stop)`);
+          if (values.open) spawn(process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", [board.url], { stdio: "ignore", detached: true }).unref();
+          const stop = () => board.close().then(() => process.exit(0));
+          process.on("SIGINT", stop);
+          process.on("SIGTERM", stop);
+        },
+        (e) => {
+          console.error(`ticketdeck: ${e.code === "EADDRINUSE" ? `port ${port} is in use (another board running? try --port)` : e.message}`);
+          process.exit(1);
+        },
+      );
+      return 0;
+    }
+
+    case "check": {
+      const id = need(rest[0], "id");
+      const n = Number(need(rest[1], "item number"));
+      if (!Number.isInteger(n) || n < 1) throw new TicketError("item number must be 1 or more");
+      const on = (rest[2] ?? "on") !== "off";
+      console.log(JSON.stringify(ticketJSON(store.setChecked(id, n - 1, on, ACTOR))));
+      return 0;
+    }
 
     case "done":
       console.log(summaryLine(store.update(need(rest[0], "id"), { status: "done" }, ACTOR)));

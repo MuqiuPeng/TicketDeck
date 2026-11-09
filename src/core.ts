@@ -250,6 +250,29 @@ export class Store {
     return this.update(id, { note }, actor);
   }
 
+  /**
+   * Ticks or unticks the `index`-th "- [ ]" item of the body (0-based, in document order),
+   * as the board's checkboxes do. Logged like any other change.
+   */
+  setChecked(id: string, index: number, checked: boolean, actor: string): Ticket {
+    return this.withLock(() => {
+      const t = this.get(id);
+      let n = -1;
+      let text = "";
+      const body = t.body.replace(/^(\s*[-*+]\s+\[)([ xX])(\]\s*)(.*)$/gm, (all, a, mark, b, rest) => {
+        if (++n !== index) return all;
+        text = rest.trim();
+        return `${a}${checked ? "x" : " "}${b}${rest}`;
+      });
+      if (n < index) throw new TicketError(`${t.id} has no checklist item ${index + 1}.`);
+      if (body === t.body) return t;
+      t.updated = timestamp();
+      t.body = appendLog(body, logLine(t.updated, actor, `${checked ? "checked" : "unchecked"}: ${text}`));
+      this.write(t);
+      return t;
+    });
+  }
+
   private checkDeps(ids: string[], self?: string): void {
     const known = new Set(this.all({ includeArchive: true }).map((t) => t.id));
     const bad = ids.filter((d) => d === self || !known.has(d));

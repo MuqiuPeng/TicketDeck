@@ -3,8 +3,8 @@
 Tickets your coding agent creates and manages itself, stored as markdown in your repo.
 Design: [docs/DESIGN.md](docs/DESIGN.md).
 
-Status: **M1** — core library, CLI and MCP server (multi-project). The board (M2) and TabStack integration
-come later.
+Status: **M2** — core library, CLI, MCP server (multi-project), a `⌃⌥T` panel in
+[TabStack](https://github.com/MuqiuPeng/TabStack) and a web board.
 
 ## Setup
 
@@ -54,6 +54,20 @@ every project. Output lines are tagged `[Project]`.
   (`archiveAfterDays` in `.tickets/config.json`).
 - Every project used is recorded in `~/.ticketdeck/projects.json` for the board.
 
+## Looking at tickets
+
+- **TabStack, `⌃⌥T`**: a floating panel with the current workspace's tickets (`Tab` for all
+  projects). `↩` switches to the project's workspace with Claude on the ticket's session,
+  `⌘D` marks done, `⌘R` back to todo, checklist items tick in place. TabStack drives the
+  CLI (`ticketdeck state` / `set` / `check`), found through `~/.ticketdeck/cli.json`, which
+  `ticketdeck setup` writes.
+- **Web board, `ticketdeck serve [--open]`**: `http://localhost:4477`, columns by status
+  across every project, drag to change status, filters (kept in the URL, so a project's
+  board can be a bookmark or a TabStack tab), detail drawer with checklist, log note,
+  links to the Claude session and to files in VS Code, and a notification when a ticket
+  reaches review. Updates live from file changes. Listens on 127.0.0.1 only and refuses
+  other Host/Origin headers.
+
 ## MCP tools
 
 | Tool | |
@@ -74,6 +88,10 @@ ticketdeck show <id>
 ticketdeck set <id> key=value...
 ticketdeck log <id> "note"
 ticketdeck done <id>
+ticketdeck check <id> <n> [on|off]
+ticketdeck state [--closed]            JSON, for TabStack
+ticketdeck serve [--port 4477] [--open]
+ticketdeck projects
 ```
 
 ## Development
