@@ -12,6 +12,11 @@
   --p2: #3b6fe0;
   --p3: #9a9a94;
   --ok: #2f9e5b;
+  --s-todo: #8a8f98;
+  --s-doing: #3b6fe0;
+  --s-review: #d9820f;
+  --s-done: #2f9e5b;
+  --s-dropped: #c4473a;
   --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 16px rgb(0 0 0 / 6%);
   color-scheme: light;
 }
@@ -26,6 +31,11 @@
     --accent: #7aa2ff;
     --accent-soft: #23304d;
     --p3: #77776f;
+    --s-todo: #9aa0aa;
+    --s-doing: #7aa2ff;
+    --s-review: #f0a640;
+    --s-done: #4cc27e;
+    --s-dropped: #e06a5e;
     --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 6px 20px rgb(0 0 0 / 35%);
     color-scheme: dark;
   }
@@ -130,9 +140,24 @@ button.danger { color: var(--p0); }
   box-shadow: var(--shadow);
   cursor: pointer;
 }
-.card[data-p=P0] { border-left-color: var(--p0); }
-.card[data-p=P1] { border-left-color: var(--p1); }
-.card[data-p=P2] { border-left-color: var(--p2); }
+/* Status is the colour: column, card edge and status pill all share it. */
+[data-s=todo] { --s: var(--s-todo); }
+[data-s=doing] { --s: var(--s-doing); }
+[data-s=review] { --s: var(--s-review); }
+[data-s=done] { --s: var(--s-done); }
+[data-s=dropped] { --s: var(--s-dropped); }
+.card[data-s] { border-left-color: var(--s); }
+.card[data-s=done], .card[data-s=dropped] { opacity: .78; }
+.card[data-s=done] .title, .card[data-s=dropped] .title { color: var(--muted); }
+.card[data-s=dropped] .title { text-decoration: line-through; }
+.col[data-s] { border-top: 3px solid var(--s); }
+.col h2 .dot, .spill .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--s); margin-right: 6px; vertical-align: 1px; }
+.col h2 .n { background: color-mix(in srgb, var(--s) 18%, transparent); color: var(--s); border-radius: 99px; padding: 0 7px; font-weight: 600; }
+.spill { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 99px; font-size: 12px; font-weight: 600;
+  color: var(--s); background: color-mix(in srgb, var(--s) 16%, transparent); }
+.prio { font-weight: 600; }
+.prio[data-p=P0] { color: var(--p0); }
+.prio[data-p=P1] { color: var(--p1); }
 .card.sel { outline: 2px solid var(--accent); }
 .card.dragging { opacity: .4; }
 .card .top { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); }

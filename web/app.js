@@ -138,7 +138,7 @@ function renderBoard() {
         "section",
         {
           class: "col",
-          dataset: { status },
+          dataset: { status, s: status },
           ondragover: (e) => {
             e.preventDefault();
             col.classList.add("drop");
@@ -152,7 +152,7 @@ function renderBoard() {
             if (t && t.status !== status) setStatus(t, status);
           },
         },
-        h("h2", {}, h("span", {}, NAMES[status]), h("span", {}, list.length)),
+        h("h2", {}, h("span", {}, h("span", { class: "dot" }), NAMES[status]), h("span", { class: "n" }, list.length)),
         h("div", { class: "cards" }, list.length ? list.map(card) : h("div", { class: "empty" }, "—")),
       );
       return col;
@@ -167,7 +167,7 @@ function card(t) {
     {
       class: `card${key(t) === selected ? " sel" : ""}`,
       draggable: "true",
-      dataset: { p: t.priority },
+      dataset: { s: t.status },
       tabindex: "0",
       onclick: () => select(key(t)),
       onkeydown: (e) => e.key === "Enter" && select(key(t)),
@@ -182,7 +182,7 @@ function card(t) {
       { class: "top" },
       h("span", { class: "mono" }, t.id),
       !view.project && h("span", { class: "chip proj" }, t.projectName),
-      h("span", {}, t.priority),
+      h("span", { class: "prio", dataset: { p: t.priority } }, t.priority),
       h("span", { class: "progress" }, c.total ? `☑ ${c.done}/${c.total}` : ""),
     ),
     h("div", { class: "title" }, t.title),
@@ -234,6 +234,7 @@ function renderDetail() {
       { class: "head" },
       h("span", { class: "chip proj" }, t.projectName),
       h("span", { class: "mono" }, t.id),
+      h("span", { class: "spill", dataset: { s: t.status } }, h("span", { class: "dot" }), NAMES[t.status]),
       t.archived && h("span", { class: "chip" }, "archived"),
       h("button", { class: "ghost x", onclick: () => select(null), title: "Close (Esc)" }, "✕"),
     ),
