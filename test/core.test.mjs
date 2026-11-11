@@ -30,7 +30,7 @@ test("create, read back, update, claim and log", () => {
   assert.equal(back.title, t.title);
   assert.equal(back.priority, "P1");
   assert.deepEqual(back.files, ["src/auth.ts"]);
-  assert.match(back.body, /## Log\n- .* · local_abcdef12 · created/);
+  assert.match(back.body, /## 日志\n- .* · local_abcdef12 · 创建/);
 
   s.claim("T-0001", "local_xyz", "local_xyz");
   const u = s.update("T-1", { status: "review", note: "fixed middleware order" }, "local_xyz");
@@ -38,10 +38,10 @@ test("create, read back, update, claim and log", () => {
   assert.equal(u.session, "local_xyz");
   s.log("T-0001", "added e2e", "user");
   const log = fs.readFileSync(u.path, "utf8");
-  assert.match(log, /status → doing, session → local_xyz — claimed/);
-  assert.match(log, /status → review — fixed middleware order/);
+  assert.match(log, /状态 → 进行中, 认领会话 → local_xyz — 认领/);
+  assert.match(log, /状态 → 待验收 — fixed middleware order/);
   assert.match(log, /user · added e2e\n$/);
-  assert.equal((log.match(/## Log/g) ?? []).length, 1);
+  assert.equal((log.match(/## 日志/g) ?? []).length, 1);
 });
 
 test("title change renames the file", () => {
@@ -160,4 +160,14 @@ test("CLI: init writes rules and .mcp.json idempotently", () => {
   assert.match(run("set", "1", "status=doing", "labels=docs,web"), /\[doing\].*#docs #web/);
   assert.match(run("done", "1"), /\[done\]/);
   assert.match(run("list"), /No open tickets/);
+});
+
+test("old English logs still parse and get appended to", () => {
+  const s = tmpProject();
+  const file = path.join(s.dir, "T-0001-old.md");
+  fs.writeFileSync(file, "---\nid: T-0001\ntitle: old\nstatus: todo\npriority: P2\ntype: chore\nlabels: []\ncreated: 2026-11-01T10:00+11:00\nupdated: 2026-11-01T10:00+11:00\ncreated_by: user\nsession:\ndepends_on: []\nfiles: []\n---\n\nctx\n\n## Log\n- 2026-11-01 10:00 · user · created\n");
+  s.update("1", { status: "done" }, "user");
+  const text = fs.readFileSync(s.get("1").path, "utf8");
+  assert.equal((text.match(/^## (Log|日志)$/gm) ?? []).length, 1, "no second log heading");
+  assert.match(text, /## Log\n- .*created\n- .*状态 → 已完成/);
 });

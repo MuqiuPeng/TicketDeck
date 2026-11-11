@@ -68,7 +68,7 @@ test("MCP: an agent session works through the whole ticket lifecycle", { timeout
   assert.match(full, /session: local_aaaaaaaa-1111/);
   assert.match(full, /created_by: local_aaaaaaaa-1111/);
   assert.match(full, /debounced redraw/);
-  assert.match(full, /status → review — ready/);
+  assert.match(full, /状态 → 待验收 — ready/);
 
   assert.ok((await a.call("ticket_get", { id: "99" })).isError);
   await a.client.close();

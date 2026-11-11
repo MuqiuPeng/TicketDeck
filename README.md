@@ -70,13 +70,19 @@ every project. Output lines are tagged `[Project]`.
 
 ## Daily report
 
-`ticketdeck report --save` writes a markdown digest of every project to
-`~/.ticketdeck/reports/<date>.md`: what needs you (tickets in review, decisions and actions
-waiting on you), the last 24 hours of activity, work in progress (stale after 3 days), top
-priorities and per-project counts. A Claude scheduled task (`ticketdeck-daily-report`, 8:00
-daily) runs it, then adds a summary and the unfinished work of yesterday's sessions that no
-ticket covers. Read it in TabStack's ⌃⌥T panel (Tab to **Report**, ←→ for other days) or on
-the board (**Daily report**, `R`).
+`ticketdeck report --save` writes a short, structured digest of every project to
+`~/.ticketdeck/reports/<date>.json`: counts (review, doing, waiting on you, done, stale),
+tickets in review, the top decisions and P0/P1 to-dos, work in progress (stale after 3 days)
+and per-project activity of the last 24 hours. A Claude scheduled task
+(`ticketdeck-daily-report`, 8:00 daily) runs it and picks the day's three focus tickets with a reason, writes a short Chinese summary and lists
+the unfinished work of yesterday's sessions that no ticket covers
+(`ticketdeck report annotate --summary … --focus "project::id::reason" --leftover "project::task::session::evidence"`).
+TabStack's ⌃⌥T panel (opens on it at the first ⌃⌥T of the day; **今日计划** button) and the
+board (**今日计划**, `R`) show it as a plan: a one- or two-sentence summary, **今日重点** — at
+most three tickets, each tagged 待验收 / 待决策 / 需你执行 / 优先推进 with how long it has been
+idle, the task's reason and a one-click action — and folded sections for yesterday's
+progress, work in progress, review, decisions and leftovers. `ticketdeck report` prints a
+plain version.
 
 ## MCP tools
 
@@ -101,7 +107,8 @@ ticketdeck done <id>
 ticketdeck check <id> <n> [on|off]
 ticketdeck state [--closed]            JSON, for TabStack
 ticketdeck serve [--port 4477] [--open]
-ticketdeck report [--save] [--hours 24]
+ticketdeck report [--save] [--json]
+ticketdeck report annotate [--summary …] [--leftover …]
 ticketdeck reports [--show <date>]
 ticketdeck projects
 ```

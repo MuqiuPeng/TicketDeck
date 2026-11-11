@@ -12,7 +12,7 @@ import { boardState, expand, globalConfig, knownProjects, roots, saveCliLocation
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { serve } from "./server.js";
-import { buildReport, listReports, localDate, readReport, saveReport } from "./report.js";
+import { PROPOSAL_GUIDE, annotateReport, buildReport, listReports, localDate, readReport, reportText, saveReport, type Leftover, type Proposal } from "./report.js";
 
 const HELP = `ticketdeck — tickets your coding agent manages, stored in .tickets/
 
@@ -29,7 +29,11 @@ Usage:
   ticketdeck check <id> <n> [on|off]        tick checklist item n (1-based)
   ticketdeck state [--closed]               every project's tickets as JSON (for TabStack)
   ticketdeck serve [--port 4477] [--open]   the web board on localhost
-  ticketdeck report [--save] [--hours 24]   daily report of every project's tickets
+  ticketdeck report [--save] [--json]       daily report of every project's tickets
+  ticketdeck report annotate [--date d] [--summary text] [--focus "project::id::reason"]... [--leftover "project::task::session::evidence"]... [--no-leftovers]
+                            [--proposals '<json>' | @file | @- ] [--no-proposals]
+                            proposals: [{"project","title","why","tickets":["T-0001"],"prompt"}], at most 5
+  ticketdeck report guide                   how to write proposals (提议执行)
   ticketdeck reports [--show <date>]        saved reports, newest first
   ticketdeck where                          print the project folder and tickets path
 
@@ -194,19 +198,71 @@ function main(argv: string[]): number {
     }
 
     case "report": {
-      const { values } = parseArgs({ args: rest, options: { save: { type: "boolean" }, hours: { type: "string" } } });
-      const md = buildReport(new Date(), Number(values.hours ?? 24));
-      if (values.save) console.log(saveReport(md, localDate()));
-      else process.stdout.write(md);
+      if (rest[0] === "guide") {
+        console.log(PROPOSAL_GUIDE);
+        return 0;
+      }
+      if (rest[0] === "annotate") {
+        const { values } = parseArgs({
+          args: rest.slice(1),
+          options: {
+            date: { type: "string" },
+            summary: { type: "string" },
+            leftover: { type: "string", multiple: true },
+            "no-leftovers": { type: "boolean" },
+            focus: { type: "string", multiple: true },
+            proposals: { type: "string" },
+            "no-proposals": { type: "boolean" },
+          },
+        });
+        const leftovers: Leftover[] | undefined = values["no-leftovers"]
+          ? []
+          : values.leftover?.map((l) => {
+              const [project, task, session, evidence] = l.split("::").map((x) => x.trim());
+              if (!project || !task) throw new TicketError(`--leftover needs "project::task[::session[::evidence]]", got "${l}"`);
+              return { project, task, ...(session ? { session } : {}), ...(evidence ? { evidence } : {}) };
+            });
+        const focus = values.focus?.map((f) => {
+          const [project, id, reason] = f.split("::").map((x) => x.trim());
+          if (!project || !id) throw new TicketError(`--focus needs "project::id[::reason]", got "${f}"`);
+          return { project, id, reason };
+        });
+        let proposals: Omit<Proposal, "id" | "root">[] | undefined;
+        if (values["no-proposals"]) proposals = [];
+        else if (values.proposals !== undefined) {
+          // A JSON array, inline or "@file" ("@-" for stdin): prompts are long and multi-line.
+          const src = values.proposals.startsWith("@")
+            ? fs.readFileSync(values.proposals === "@-" ? 0 : values.proposals.slice(1), "utf8")
+            : values.proposals;
+          let parsed: unknown;
+          try { parsed = JSON.parse(src); } catch (e) { throw new TicketError(`--proposals: not JSON (${(e as Error).message})`); }
+          if (!Array.isArray(parsed)) throw new TicketError("--proposals: expected a JSON array");
+          proposals = parsed;
+        }
+        const r = annotateReport(values.date ?? localDate(), values.summary, leftovers, focus, proposals);
+        process.stdout.write(reportText(r));
+        return 0;
+      }
+      const { values } = parseArgs({
+        args: rest,
+        options: { save: { type: "boolean" }, json: { type: "boolean" }, hours: { type: "string" } },
+      });
+      const r = buildReport(new Date(), Number(values.hours ?? 24));
+      if (values.save) {
+        // Keep an annotation already written today if the facts are refreshed.
+        const prev = readReport(r.date);
+        if (prev) Object.assign(r, { summary: prev.summary, leftovers: prev.leftovers, proposals: prev.proposals ?? null, ...(prev.focus?.some((f) => f.reason) ? { focus: prev.focus } : {}) });
+        console.log(saveReport(r));
+      } else process.stdout.write(values.json ? JSON.stringify(r, null, 2) + "\n" : reportText(r));
       return 0;
     }
 
     case "reports": {
       const { values } = parseArgs({ args: rest, options: { show: { type: "string" } } });
       if (values.show) {
-        const md = readReport(values.show);
-        if (md == null) throw new TicketError(`No report for ${values.show}.`);
-        process.stdout.write(md);
+        const r = readReport(values.show);
+        if (!r) throw new TicketError(`No report for ${values.show}.`);
+        process.stdout.write(reportText(r));
       } else console.log(listReports().join("\n") || "No reports yet.");
       return 0;
     }

@@ -58,8 +58,8 @@ export function serve(opts: ServeOptions): Promise<Board> {
       if (req.method === "GET" && url.pathname === "/api/reports") return send(res, 200, { dates: listReports() });
       if (req.method === "GET" && url.pathname === "/api/report") {
         const date = url.searchParams.get("date") ?? listReports()[0] ?? "";
-        const markdown = readReport(date);
-        return markdown == null ? send(res, 404, { error: "no report" }) : send(res, 200, { date, markdown });
+        const report = readReport(date);
+        return report == null ? send(res, 404, { error: "no report" }) : send(res, 200, report);
       }
       if (req.method === "GET" && url.pathname === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });

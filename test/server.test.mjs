@@ -65,32 +65,55 @@ test("board: state, updates, checklist, create, live events and request guards",
   assert.equal(status, 403);
 });
 
-test("daily report: sections, activity window, saved reports over the API", { timeout: 20000 }, async (t) => {
+test("daily report: structure, activity window, annotate, API", { timeout: 20000 }, async (t) => {
   const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ticketdeck-report-")));
   process.env.TICKETDECK_HOME = path.join(parent, ".home");
   const root = path.join(parent, "Proj");
   fs.mkdirSync(root);
   const store = new Store(root);
   store.init();
-  store.create({ title: "Needs review", labels: [] }, "local_a");
+  store.create({ title: "Needs review" }, "local_a");
   store.update("1", { status: "review" }, "local_a");
   store.create({ title: "Pick an approach", priority: "P1", labels: ["decision"] }, "local_a");
+  store.create({ title: "Urgent fix", priority: "P0" }, "local_a");
+  store.create({ title: "Shipped" }, "local_a");
+  store.update("4", { status: "done" }, "user");
   fs.mkdirSync(process.env.TICKETDECK_HOME, { recursive: true });
   fs.writeFileSync(path.join(process.env.TICKETDECK_HOME, "projects.json"), JSON.stringify({ projects: [{ path: root, lastUsed: new Date().toISOString() }] }));
 
-  const { buildReport, saveReport, localDate } = await import("../dist/report.js");
-  const md = buildReport(new Date());
-  for (const h of ["# Daily report", "## Needs you", "## Last 24 hours", "## In progress", "## Top priorities", "## By project"]) assert.ok(md.includes(h), h);
-  assert.match(md, /Ready for review \(1\)[\s\S]*\*\*Proj\*\* T-0001 Needs review/);
-  assert.match(md, /Waiting on your decision or action \(1\)[\s\S]*P1 \*\*Proj\*\* T-0002/);
-  assert.match(md, /\*\*Proj\*\* — 2 new, 1 updates/);
-  assert.match(buildReport(new Date(Date.now() + 3 * 86_400_000)), /No ticket activity/);
+  const { buildReport, saveReport, annotateReport, reportText } = await import("../dist/report.js");
+  const r = buildReport(new Date());
+  assert.deepEqual(r.review.map((i) => i.id), ["T-0001"]);
+  assert.deepEqual(r.decisions.map((i) => i.id), ["T-0002"]);
+  assert.deepEqual(r.priorities.map((i) => i.id), ["T-0003"], "decisions are not repeated as priorities");
+  assert.deepEqual(r.activity, [{ project: "Proj", root, created: 4, done: 1, updated: 1 }]);
+  assert.equal(r.totals.done, 1);
+  assert.equal(buildReport(new Date(Date.now() + 3 * 86_400_000)).activity.length, 0);
+  // 今日重点: review first, then decisions, then P0/P1 work.
+  assert.deepEqual(r.focus.map((f) => [f.id, f.kind]), [["T-0001", "review"], ["T-0002", "decision"], ["T-0003", "push"]]);
 
-  saveReport(md, localDate());
+  saveReport(r);
+  const a = annotateReport(r.date, "两句话的总结。", [{ project: "Proj", task: "Commit the thing", session: "local_x" }], [{ project: "proj", id: "3", reason: "上线前必须修" }]);
+  assert.equal(a.summary, "两句话的总结。");
+  assert.deepEqual(a.focus.map((f) => [f.id, f.kind, f.reason]), [["T-0003", "push", "上线前必须修"]]);
+  assert.match(reportText(a), /今日重点[\s\S]*优先推进[\s\S]*上线前必须修[\s\S]*待纳入计划[\s\S]*Commit the thing/);
+
+  // 提议执行: written separately, checked, numbered; other annotations stay.
+  assert.equal(a.proposals ?? null, null);
+  const p = annotateReport(r.date, undefined, undefined, undefined, [
+    { project: "proj", title: "关掉已完成的工单", why: "代码已合并", tickets: ["T-0001"], prompt: "核对 T-0001 是否已合并，是就关掉。" },
+  ]);
+  assert.deepEqual(p.proposals, [{ id: "p1", project: "Proj", root, title: "关掉已完成的工单", prompt: "核对 T-0001 是否已合并，是就关掉。", why: "代码已合并", tickets: ["T-0001"] }]);
+  assert.equal(p.summary, "两句话的总结。");
+  assert.match(reportText(p), /提议执行 · 1 项[\s\S]*p1 Proj 关掉已完成的工单/);
+  assert.throws(() => annotateReport(r.date, undefined, undefined, undefined, [{ project: "Nope", title: "x", prompt: "y" }]), /no project/);
+  assert.throws(() => annotateReport(r.date, undefined, undefined, undefined, [{ project: "Proj", title: "x" }]), /needs project, title and prompt/);
+  assert.equal(annotateReport(r.date, undefined, undefined, undefined, []).proposals.length, 0);
+
   const board = await serve({ port: 0 });
   t.after(() => board.close());
   const base = board.url.replace(/\/$/, "");
-  assert.deepEqual((await (await fetch(`${base}/api/reports`)).json()).dates, [localDate()]);
-  assert.match((await (await fetch(`${base}/api/report`)).json()).markdown, /# Daily report/);
+  assert.deepEqual((await (await fetch(`${base}/api/reports`)).json()).dates, [r.date]);
+  assert.equal((await (await fetch(`${base}/api/report`)).json()).summary, "两句话的总结。");
   assert.equal((await fetch(`${base}/api/report?date=../../etc/passwd`)).status, 404);
 });

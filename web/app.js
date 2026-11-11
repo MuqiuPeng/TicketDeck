@@ -290,35 +290,141 @@ function renderDetail() {
   pane.scrollTop = scroll;
 }
 
+function agoZh(ts) {
+  const d = (Date.now() - Date.parse(ts)) / 1000;
+  if (!isFinite(d)) return "";
+  if (d < 3600) return `${Math.max(1, Math.floor(d / 60))} 分钟前`;
+  if (d < 86400) return `${Math.floor(d / 3600)} 小时前`;
+  return `${Math.floor(d / 86400)} 天前`;
+}
+
+const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+const KIND = {
+  review: ["待验收", "review"],
+  decision: ["待决策", "decide"],
+  action: ["需你执行", "decide"],
+  push: ["优先推进", "doing"],
+};
+
 async function renderReport() {
   const pane = $("#detail");
-  const [{ dates }, rep] = await Promise.all([
-    fetch("/api/reports").then((r) => r.json()),
-    fetch(`/api/report${reportDate ? `?date=${reportDate}` : ""}`).then((r) => (r.ok ? r.json() : null)),
+  const [{ dates }, r] = await Promise.all([
+    fetch("/api/reports").then((x) => x.json()),
+    fetch(`/api/report${reportDate ? `?date=${reportDate}` : ""}`).then((x) => (x.ok ? x.json() : null)),
   ]);
   if (reportDate == null) return; // closed while loading
   pane.hidden = false;
   pane.classList.add("report");
-  const body = h("div", { class: "md" });
-  if (rep) {
-    body.innerHTML = marked.parse(rep.markdown);
-    for (const a of body.querySelectorAll("a")) if (!/^(https?:|mailto:)/i.test(a.getAttribute("href") ?? "")) a.removeAttribute("href");
-    for (const img of body.querySelectorAll("img")) img.replaceWith(img.alt ?? "");
-  } else body.append(h("p", {}, "No report yet. One is written every morning at 8:00, or run `ticketdeck report --save`."));
-  pane.replaceChildren(
-    h(
-      "div",
-      { class: "head" },
-      h("strong", {}, "Daily report"),
-      dates.length > 0 &&
+  const head = h(
+    "div",
+    { class: "head" },
+    h("strong", {}, "今日计划"),
+    dates.length > 1 &&
+      h(
+        "select",
+        { onchange: (e) => ((reportDate = e.target.value), renderReport(), syncURL()) },
+        dates.map((d) => h("option", { value: d, selected: d === r?.date }, d)),
+      ),
+    h("button", { class: "ghost x", onclick: () => closeReport(), title: "关闭 (Esc)" }, "✕"),
+  );
+  if (!r) {
+    pane.replaceChildren(head, h("p", { class: "muted" }, "还没有今日计划。每天早上 8 点自动生成，也可以运行 ticketdeck report --save。"));
+    return;
+  }
+  const d = new Date(`${r.date}T00:00`);
+  const T = r.totals;
+  const status = [T.done && `昨日完成 ${T.done} 项`, T.review && `${T.review} 项待验收`, T.stale && `${T.stale} 项停滞`]
+    .filter(Boolean)
+    .join(" · ") || `${T.open} 项任务进行中`;
+  const open = (i) => select(`${i.root}#${i.id}`);
+  const all = allTickets();
+  const live = (i) => all.find((t) => t.project === i.root && t.id === i.id);
+
+  const focusRow = (f, n) => {
+    const [label, s] = KIND[f.kind] ?? KIND.push;
+    const t = live(f);
+    const finished = t && (t.status === "done" || t.status === "dropped");
+    const url = sessionURL(t?.session ?? f.session);
+    return h(
+      "li",
+      { class: `focus${finished ? " finished" : ""}`, dataset: { s } },
+      h("span", { class: "num" }, n),
+      h(
+        "div",
+        { class: "fbody", onclick: () => open(f) },
+        h("div", { class: "ft" }, h("span", { class: "fp" }, f.project), " · ", f.title),
         h(
-          "select",
-          { onchange: (e) => ((reportDate = e.target.value), renderReport(), syncURL()) },
-          dates.map((d) => h("option", { value: d, selected: d === (rep?.date ?? reportDate) }, d)),
+          "div",
+          { class: "fm" },
+          h("span", { class: "tag" }, finished ? "已完成" : label),
+          f.idleDays >= 2 && !finished && h("span", {}, `${f.idleDays} 天未推进`),
+          f.reason && h("span", { class: "why" }, f.reason),
         ),
-      h("button", { class: "ghost x", onclick: () => closeReport(), title: "Close (Esc)" }, "✕"),
-    ),
-    body,
+      ),
+      !finished &&
+        (f.kind === "review"
+          ? h("button", { onclick: () => setStatus({ project: f.root, id: f.id }, "done") }, "验收通过")
+          : url
+            ? h("button", { onclick: () => (location.href = url) }, "继续会话")
+            : h("button", { onclick: () => open(f) }, "查看")),
+    );
+  };
+  const fold = (title, count, s, body) =>
+    count > 0 && h("details", { class: "fold", dataset: { s } }, h("summary", {}, h("span", { class: "dot" }), title, h("span", { class: "cnt" }, count)), body);
+  const list = (items, more) =>
+    h(
+      "ul",
+      { class: "flist" },
+      items.map((i) =>
+        h("li", { onclick: () => open(i) }, h("span", { class: "fp" }, i.project), h("span", { class: "rt" }, i.title), i.stale && h("span", { class: "warn small" }, "停滞")),
+      ),
+      more && h("li", { class: "more" }, more),
+    );
+
+  pane.replaceChildren(
+    ...[
+      head,
+      h("h1", { class: "rtitle" }, `${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${WEEK[d.getDay()]}`),
+      h("div", { class: "muted small" }, status),
+      r.summary && h("p", { class: "summary" }, r.summary),
+      h("div", { class: "seclabel" }, "今日重点"),
+      r.focus?.length
+        ? h("ol", { class: "focuslist" }, r.focus.map((f, i) => focusRow(f, i + 1)))
+        : h("p", { class: "muted" }, "今天没有需要你优先处理的任务。"),
+      h(
+        "div",
+        { class: "folds" },
+        fold(
+          "昨日进展",
+          r.activity.length,
+          "done",
+          h(
+            "div",
+            { class: "acts" },
+            r.activity.map((a) =>
+              h(
+                "div",
+                { class: "act", onclick: () => ((view.project = a.root), closeReport(), render()) },
+                h("span", { class: "an" }, a.project),
+                a.done > 0 && h("span", { class: "pill", dataset: { s: "done" } }, `完成 ${a.done}`),
+                a.updated > 0 && h("span", { class: "pill", dataset: { s: "doing" } }, `更新 ${a.updated}`),
+                a.created > 0 && h("span", { class: "pill", dataset: { s: "todo" } }, `新增 ${a.created}`),
+              ),
+            ),
+          ),
+        ),
+        fold("进行中", r.doing.length, "doing", list(r.doing)),
+        fold("待验收", r.review.length, "review", list(r.review)),
+        fold("待决策与待执行", T.decisions, "decide", list(r.decisions, T.decisions > r.decisions.length && `另有 ${T.decisions - r.decisions.length} 项，可在看板按标签 decision / needs-user 筛选`)),
+        fold(
+          "待纳入计划",
+          r.leftovers?.length ?? 0,
+          "leftover",
+          h("ul", { class: "flist" }, (r.leftovers ?? []).map((l) => h("li", {}, h("span", { class: "fp" }, l.project), h("span", { class: "rt" }, l.task)))),
+        ),
+      ),
+    ].filter(Boolean),
   );
 }
 

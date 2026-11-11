@@ -22,6 +22,8 @@ export const INSTRUCTIONS = `TicketDeck keeps each project's tickets as markdown
 
 Which project: sessions are often started in a parent folder (e.g. ~/projects) while working on one project inside it. Pass \`project\` (its folder name, e.g. "TabStack", or a path) whenever the session folder is not the project itself; after that, calls without \`project\` stay on the same project. \`files\` paths also identify it. ticket_list with no project, outside a project, lists every project's tickets.
 
+Language: write everything that goes into a ticket in Simplified Chinese — titles, bodies, acceptance criteria, log notes and update notes — whatever language the conversation uses. Keep code, file paths, identifiers, commands, branch names and quoted messages as they are.
+
 When to use the tools:
 - First thing on any task that will change a project's files — before reading code or editing — call ticket_list for that project. Use the tool even if you can see .tickets/ on disk: only the tool shows which session holds what, and only ticket_claim tells other sessions you are on it.
 - If a ticket covers the task, or the part you are about to do, ticket_claim it before your first edit; if another session holds it, leave it alone and tell the user. Read and change tickets only through these tools, never by opening or editing .tickets/ files.
@@ -149,9 +151,9 @@ server.registerTool(
       "without tickets yet gets a .tickets/ folder.",
     inputSchema: {
       project,
-      title: z.string().describe("Short, specific; what is wrong or what to build."),
+      title: z.string().describe("In Chinese. Short, specific; what is wrong or what to build."),
       body: z.string().describe(
-        "Markdown: context (where you found it, why it matters) and acceptance criteria as a '- [ ]' checklist.",
+        "Markdown in Chinese: context (where you found it, why it matters), then '## 验收标准' with a '- [ ]' checklist.",
       ),
       type: z.enum(TYPES).optional().describe("Default feature."),
       priority: z.enum(PRIORITIES).optional().describe("P0 urgent … P3 someday. Default P2."),
@@ -195,7 +197,7 @@ server.registerTool(
       depends_on: list("Replaces the dependencies."),
       files: list("Replaces the file list."),
       release: z.boolean().optional().describe("Clear the claiming session (e.g. when handing back to todo)."),
-      note: z.string().optional().describe("Why; appended to the log with the change."),
+      note: z.string().optional().describe("Why, in Chinese; appended to the log with the change."),
     },
   },
   ({ project, id, release, files, ...patch }) =>
@@ -228,7 +230,7 @@ server.registerTool(
   {
     description:
       "Append one line of progress to a ticket's log. Logging work on an unclaimed todo ticket claims it for this session.",
-    inputSchema: { project, id, note: z.string() },
+    inputSchema: { project, id, note: z.string().describe("One line of progress, in Chinese.") },
   },
   ({ project, id, note }) =>
     run({ project }, (ctx) => {

@@ -44,7 +44,14 @@ export interface Config {
 
 const DEFAULT_CONFIG: Config = { prefix: "T", archiveAfterDays: 14 };
 export const TICKETS_DIR = ".tickets";
-const LOG_HEADING = "## Log";
+const LOG_HEADING = "## 日志";
+/** Log headings, new and old (tickets written before the switch to Chinese use "## Log"). */
+export const LOG_HEADINGS = ["## 日志", "## Log"];
+const STATUS_ZH: Record<string, string> = { todo: "待办", doing: "进行中", review: "待验收", done: "已完成", dropped: "已放弃" };
+const FIELD_ZH: Record<string, string> = {
+  title: "标题", status: "状态", priority: "优先级", type: "类型", labels: "标签",
+  files: "文件", session: "认领会话", depends_on: "依赖",
+};
 
 export class TicketError extends Error {}
 
@@ -201,7 +208,7 @@ export class Store {
         path: path.join(this.dir, `${id}${slug(title)}.md`),
         archived: false,
       };
-      t.body = `${(input.body ?? "").trim()}\n\n${LOG_HEADING}\n${logLine(now, actor, "created")}\n`.trimStart();
+      t.body = `${(input.body ?? "").trim()}\n\n${LOG_HEADING}\n${logLine(now, actor, "创建")}\n`.trimStart();
       fs.writeFileSync(t.path, serializeTicket(t), { flag: "wx" });
       return { ticket: t };
     });
@@ -213,7 +220,11 @@ export class Store {
       const changes: string[] = [];
       const set = <K extends keyof TicketPatch & keyof Ticket>(key: K, value: Ticket[K] | undefined) => {
         if (value === undefined || JSON.stringify(t[key]) === JSON.stringify(value)) return;
-        changes.push(Array.isArray(value) ? `${key} → [${value.join(", ")}]` : `${key} → ${value}`);
+        const shown = Array.isArray(value)
+          ? `[${value.join(", ")}]`
+          : key === "status" ? STATUS_ZH[String(value)] ?? value
+          : value === null ? "无" : value;
+        changes.push(`${FIELD_ZH[key] ?? key} → ${shown}`);
         (t as any)[key] = value;
       };
       if (patch.title !== undefined) set("title", patch.title.trim());
@@ -242,7 +253,7 @@ export class Store {
     const t = this.get(id);
     if (t.status === "done" || t.status === "dropped")
       throw new TicketError(`${t.id} is ${t.status}; reopen it with status=todo first.`);
-    return this.update(id, { status: "doing", session, note: "claimed" }, actor);
+    return this.update(id, { status: "doing", session, note: "认领" }, actor);
   }
 
   log(id: string, note: string, actor: string): Ticket {
@@ -267,7 +278,7 @@ export class Store {
       if (n < index) throw new TicketError(`${t.id} has no checklist item ${index + 1}.`);
       if (body === t.body) return t;
       t.updated = timestamp();
-      t.body = appendLog(body, logLine(t.updated, actor, `${checked ? "checked" : "unchecked"}: ${text}`));
+      t.body = appendLog(body, logLine(t.updated, actor, `${checked ? "勾选" : "取消勾选"}：${text}`));
       this.write(t);
       return t;
     });
@@ -486,7 +497,8 @@ export function shortActor(actor: string): string {
 
 function appendLog(body: string, line: string): string {
   const b = body.replace(/\s*$/, "");
-  return (b.includes(`\n${LOG_HEADING}\n`) || b.startsWith(`${LOG_HEADING}\n`) || b.endsWith(LOG_HEADING)
+  const has = (h: string) => b.includes(`\n${h}\n`) || b.startsWith(`${h}\n`) || b.endsWith(h);
+  return (LOG_HEADINGS.some(has)
     ? `${b}\n${line}`
     : `${b}\n\n${LOG_HEADING}\n${line}`
   ).replace(/^\n+/, "") + "\n";
