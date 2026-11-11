@@ -12,7 +12,8 @@ import {
   type TicketPatch,
 } from "./core.js";
 import { boardState, knownProjects, ticketJSON } from "./projects.js";
-import { listReports, readReport, reportsDir } from "./report.js";
+import { listReports, readReport, reportsDir, setProposalStatus } from "./report.js";
+import { proposeDate, readJob, startPropose } from "./propose.js";
 
 const ACTOR = "user";
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web");
@@ -59,7 +60,8 @@ export function serve(opts: ServeOptions): Promise<Board> {
       if (req.method === "GET" && url.pathname === "/api/report") {
         const date = url.searchParams.get("date") ?? listReports()[0] ?? "";
         const report = readReport(date);
-        return report == null ? send(res, 404, { error: "no report" }) : send(res, 200, report);
+        // The on-demand 提议执行 run for that date travels with the report.
+        return report == null ? send(res, 404, { error: "no report" }) : send(res, 200, { ...report, proposeJob: readJob(date) });
       }
       if (req.method === "GET" && url.pathname === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -159,6 +161,10 @@ function post(route: string, b: Record<string, any>) {
       return toJSON(storeFor(b.project).setChecked(String(b.id), Number(b.index), !!b.checked, ACTOR));
     case "/api/log":
       return toJSON(storeFor(b.project).log(String(b.id), String(b.note ?? ""), ACTOR));
+    case "/api/proposal":
+      return setProposalStatus(String(b.date ?? proposeDate()), String(b.id), b.status);
+    case "/api/propose":
+      return startPropose(proposeDate(typeof b.date === "string" ? b.date : undefined));
     case "/api/create": {
       const store = storeFor(b.project);
       const r = store.create(

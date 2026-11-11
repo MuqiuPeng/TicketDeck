@@ -116,4 +116,24 @@ test("daily report: structure, activity window, annotate, API", { timeout: 20000
   assert.deepEqual((await (await fetch(`${base}/api/reports`)).json()).dates, [r.date]);
   assert.equal((await (await fetch(`${base}/api/report`)).json()).summary, "两句话的总结。");
   assert.equal((await fetch(`${base}/api/report?date=../../etc/passwd`)).status, 404);
+
+  // 提议执行: statuses survive a rewrite of the same proposal; the board sets them.
+  const { setProposalStatus } = await import("../dist/report.js");
+  annotateReport(r.date, undefined, undefined, undefined, [
+    { project: "Proj", title: "关掉已完成的工单", prompt: "核对。" },
+    { project: "Proj", title: "删除已合并分支", prompt: "删。" },
+  ]);
+  assert.equal(setProposalStatus(r.date, "p1", "dismissed").status, "dismissed");
+  const again = annotateReport(r.date, undefined, undefined, undefined, [
+    { project: "Proj", title: "删除已合并分支", prompt: "删。" },
+    { project: "Proj", title: "关掉已完成的工单", prompt: "核对。" },
+  ]);
+  assert.deepEqual(again.proposals.map((p) => [p.id, p.status]), [["p1", undefined], ["p2", "dismissed"]]);
+  const post = (route, body) => fetch(`${base}/api/${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  assert.equal((await (await post("proposal", { date: r.date, id: "p1", status: "started" })).json()).status, "started");
+  assert.equal((await post("proposal", { date: r.date, id: "p9", status: "started" })).status, 400);
+  assert.equal((await post("proposal", { date: r.date, id: "p1", status: "bogus" })).status, 400);
+  const served = await (await fetch(`${base}/api/report`)).json();
+  assert.deepEqual(served.proposals.map((p) => p.status ?? null), ["started", "dismissed"]);
+  assert.equal(served.proposeJob, null);
 });

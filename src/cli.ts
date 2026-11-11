@@ -12,7 +12,8 @@ import { boardState, expand, globalConfig, knownProjects, roots, saveCliLocation
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { serve } from "./server.js";
-import { PROPOSAL_GUIDE, annotateReport, buildReport, listReports, localDate, readReport, reportText, saveReport, type Leftover, type Proposal } from "./report.js";
+import { proposeDate, runPropose, startPropose } from "./propose.js";
+import { PROPOSAL_GUIDE, annotateReport, setProposalStatus, buildReport, listReports, localDate, readReport, reportText, saveReport, type Leftover, type Proposal } from "./report.js";
 
 const HELP = `ticketdeck — tickets your coding agent manages, stored in .tickets/
 
@@ -34,6 +35,8 @@ Usage:
                             [--proposals '<json>' | @file | @- ] [--no-proposals]
                             proposals: [{"project","title","why","tickets":["T-0001"],"prompt"}], at most 5
   ticketdeck report guide                   how to write proposals (提议执行)
+  ticketdeck report propose [--background] [--date d]   write proposals now with Claude Code (claude -p)
+  ticketdeck report proposal <id> started|dismissed|open [--date d]
   ticketdeck reports [--show <date>]        saved reports, newest first
   ticketdeck where                          print the project folder and tickets path
 
@@ -198,6 +201,29 @@ function main(argv: string[]): number {
     }
 
     case "report": {
+      if (rest[0] === "propose") {
+        const { values } = parseArgs({ args: rest.slice(1), options: { date: { type: "string" }, background: { type: "boolean" } } });
+        const date = proposeDate(values.date);
+        if (values.background) {
+          console.log(JSON.stringify(startPropose(date)));
+          return 0;
+        }
+        // Runs on after main returns (the child process keeps node alive).
+        void runPropose(date).then((job) => {
+          if (job.state === "failed") {
+            console.error(`ticketdeck: ${job.error ?? "生成失败"}`);
+            process.exitCode = 1;
+          } else console.log(job.result ?? "done");
+        });
+        return 0;
+      }
+      if (rest[0] === "proposal") {
+        const [id, status] = rest.slice(1).filter((a) => !a.startsWith("--"));
+        const { values } = parseArgs({ args: rest.slice(1), options: { date: { type: "string" } }, allowPositionals: true });
+        if (!id || !status) throw new TicketError('usage: ticketdeck report proposal <id> started|dismissed|open [--date d]');
+        console.log(JSON.stringify(setProposalStatus(values.date ?? proposeDate(), id, status as "started" | "dismissed" | "open")));
+        return 0;
+      }
       if (rest[0] === "guide") {
         console.log(PROPOSAL_GUIDE);
         return 0;

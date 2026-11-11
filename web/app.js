@@ -19,6 +19,7 @@ const view = {
 let data = { projects: [], statuses: [], priorities: [], types: [] };
 let selected = params.get("ticket"); // "<project path>#<id>"
 let reportDate = params.get("report"); // "" = newest, null = closed
+let proposalsOpen = params.get("proposals") === "1"; // 提议执行, a drawer of its own
 let lastStatus = null; // key → status, to notice tickets reaching review
 
 // Untrusted text: tickets are written by agents. Raw HTML in markdown is shown as text.
@@ -55,6 +56,16 @@ async function load() {
   data = await res.json();
   noticeReviews();
   render();
+  countProposals();
+}
+
+/** The open proposals on today's plan, as a badge on the 提议执行 button. */
+async function countProposals() {
+  const r = await fetch("/api/report").then((x) => (x.ok ? x.json() : null)).catch(() => null);
+  const n = r && r.date === localDay() ? (r.proposals ?? []).filter((p) => !p.status).length : 0;
+  const c = $("#proposals-count");
+  c.hidden = n === 0;
+  c.textContent = n;
 }
 
 async function api(route, body) {
@@ -204,6 +215,7 @@ function renderDetail() {
   const pane = $("#detail");
   pane.classList.remove("report");
   if (!t) {
+    if (proposalsOpen) return renderProposals();
     if (reportDate != null) return renderReport();
     pane.hidden = true;
     return;
@@ -428,8 +440,159 @@ async function renderReport() {
   );
 }
 
+// MARK: 提议执行
+
+function openProposals() {
+  selected = null;
+  reportDate = null;
+  proposalsOpen = true;
+  renderBoard();
+  renderDetail();
+  syncURL();
+}
+
+function closeProposals() {
+  proposalsOpen = false;
+  renderDetail();
+  syncURL();
+}
+
+/** What a new Claude Code session gets for a proposal (the same text TabStack sends). */
+function proposalPrompt(date, p) {
+  const tickets = (p.tickets ?? []).join("、");
+  return (
+    `（来自 TicketDeck 今日计划 ${date} 的提议 ${p.id}：${p.title}${tickets ? `，涉及 ${tickets}` : ""}）\n\n` +
+    `开始前先整理侧边栏：调用 \`mcp__ccd_sidebar__list_groups\`，如果有名字和项目「${p.project}」相同（不区分大小写）的分组，` +
+    `就用 \`mcp__ccd_sidebar__move_sessions\`（session_ids: ["self"]）把这个会话移进去；没有就跳过，不要新建分组。\n\n` +
+    p.prompt
+  );
+}
+
+async function setProposal(date, p, status) {
+  await api("proposal", { date, id: p.id, status });
+}
+
+async function renderProposals() {
+  const pane = $("#detail");
+  const r = await fetch("/api/report").then((x) => (x.ok ? x.json() : null));
+  if (!proposalsOpen) return; // closed while loading
+  pane.hidden = false;
+  pane.classList.add("report");
+  const job = r?.proposeJob;
+  const running = job?.state === "running";
+  const today = r && r.date === localDay();
+  const all = r?.proposals ?? [];
+  const open = all.filter((p) => !p.status);
+  const started = all.filter((p) => p.status === "started");
+  const dismissed = all.filter((p) => p.status === "dismissed");
+  const generate = h(
+    "button",
+    {
+      class: "primary",
+      disabled: running || !r,
+      title: "在后台用 Claude Code 检查所有项目的工单和仓库（只读），把值得清理的任务写进计划，约一两分钟",
+      onclick: async () => {
+        const res = await fetch("/api/propose", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ date: r.date }) });
+        if (!res.ok) toast((await res.json()).error ?? "启动失败");
+        renderProposals();
+      },
+    },
+    running ? "生成中…" : all.length || r?.proposals ? "重新生成" : "生成提议",
+  );
+  const head = h(
+    "div",
+    { class: "head" },
+    h("strong", {}, "提议执行"),
+    r && h("span", { class: "muted small" }, r.date),
+    h("button", { class: "ghost x", onclick: () => closeProposals(), title: "关闭 (Esc)" }, "✕"),
+  );
+  if (!r) {
+    pane.replaceChildren(head, h("p", { class: "muted" }, "还没有今日计划。每天早上 8 点自动生成，也可以运行 ticketdeck report --save。"));
+    return;
+  }
+  const row = (p) => {
+    const url = `claude://code/new?${new URLSearchParams({ q: proposalPrompt(r.date, p), folder: p.root, source: "url_external" })}`;
+    return h(
+      "li",
+      { class: `proposal${p.status ? ` ${p.status}` : ""}` },
+      h(
+        "div",
+        { class: "fbody" },
+        h("div", { class: "ft" }, h("span", { class: "fp" }, p.project), " · ", p.title),
+        h(
+          "div",
+          { class: "fm" },
+          p.status === "started" && h("span", { class: "tag", dataset: { s: "done" } }, "已开会话"),
+          p.why && h("span", { class: "why" }, p.why),
+          (p.tickets ?? []).map((id) =>
+            h("a", { href: "#", class: "mono", onclick: (e) => (e.preventDefault(), select(`${p.root}#${id}`)) }, id),
+          ),
+        ),
+        h("details", { class: "pprompt" }, h("summary", {}, "任务说明"), h("pre", {}, p.prompt)),
+      ),
+      h(
+        "div",
+        { class: "pbtns" },
+        p.status === "dismissed"
+          ? h("button", { onclick: () => setProposal(r.date, p, "open") }, "恢复")
+          : [
+              h(
+                "button",
+                {
+                  class: p.status ? "" : "primary",
+                  title: "在项目里新开一个 Claude Code 会话，填好任务说明，按回车开始",
+                  onclick: async () => {
+                    await setProposal(r.date, p, "started");
+                    location.href = url;
+                  },
+                },
+                p.status === "started" ? "再开一次" : "执行",
+              ),
+              h(
+                "button",
+                {
+                  title: "复制给新会话的任务说明",
+                  onclick: async () => {
+                    await navigator.clipboard.writeText(proposalPrompt(r.date, p));
+                    toast("已复制任务说明");
+                  },
+                },
+                "复制",
+              ),
+              !p.status && h("button", { class: "ghost", onclick: () => setProposal(r.date, p, "dismissed") }, "忽略"),
+            ],
+      ),
+    );
+  };
+  pane.replaceChildren(
+    ...[
+      head,
+      h("h1", { class: "rtitle" }, "提议执行"),
+      h("div", { class: "muted small" }, "清理类任务：同意后在项目里新开 Claude Code 会话处理，按回车开始。每天早上 8 点随今日计划生成。"),
+      today && h("div", { class: "genrow" }, generate, running && h("span", { class: "muted small" }, "在后台运行，写完会自动出现")),
+      job?.state === "failed" && today && h("p", { class: "warn small" }, job.error),
+      all.length === 0
+        ? h("p", { class: "muted" }, r.proposals ? "没有需要清理的任务。" : "还没有提议。")
+        : open.length === 0 && started.length === 0 && h("p", { class: "muted" }, "提议都已处理。"),
+      open.length > 0 && h("ul", { class: "focuslist" }, open.map(row)),
+      started.length > 0 && [h("div", { class: "seclabel" }, `已开会话 · ${started.length}`), h("ul", { class: "focuslist" }, started.map(row))],
+      dismissed.length > 0 &&
+        h("details", { class: "fold" }, h("summary", {}, h("span", { class: "dot" }), "已忽略", h("span", { class: "cnt" }, dismissed.length)), h("ul", { class: "focuslist" }, dismissed.map(row))),
+    ].filter(Boolean).flat(),
+  );
+  const c = $("#proposals-count");
+  c.hidden = !(today && open.length);
+  c.textContent = open.length;
+}
+
+function localDay(d = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function openReport() {
   selected = null;
+  proposalsOpen = false;
   reportDate = "";
   renderBoard();
   renderDetail();
@@ -443,7 +606,7 @@ function closeReport() {
 }
 
 function select(k) {
-  if (k) reportDate = null;
+  if (k) (reportDate = null), (proposalsOpen = false);
   selected = k;
   renderBoard();
   renderDetail();
@@ -462,6 +625,7 @@ function syncURL() {
   if (view.closed) p.set("closed", "1");
   if (selected) p.set("ticket", selected);
   if (reportDate != null) p.set("report", reportDate);
+  if (proposalsOpen) p.set("proposals", "1");
   const qs = p.toString();
   history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
 }
@@ -542,6 +706,7 @@ $("#f-search").oninput = (e) => ((view.q = e.target.value), renderBoard(), syncU
 $("#f-closed").onchange = (e) => ((view.closed = e.target.checked), load());
 $("#new").onclick = openNew;
 $("#report").onclick = () => (reportDate != null ? closeReport() : openReport());
+$("#proposals").onclick = () => (proposalsOpen ? closeProposals() : openProposals());
 $("#new-form").addEventListener("submit", (e) => {
   if (e.submitter?.value !== "create") return;
   e.preventDefault();
@@ -556,11 +721,13 @@ if ("Notification" in window && Notification.permission === "default") {
 
 document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
-  if (e.key === "Escape" && !$("#new-dialog").open) (reportDate != null && !selected ? closeReport() : select(null));
+  if (e.key === "Escape" && !$("#new-dialog").open)
+    proposalsOpen && !selected ? closeProposals() : reportDate != null && !selected ? closeReport() : select(null);
   if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "n") (e.preventDefault(), openNew());
   if (e.key === "/") (e.preventDefault(), $("#f-search").focus());
   if (e.key === "r") (e.preventDefault(), reportDate != null ? closeReport() : openReport());
+  if (e.key === "p") (e.preventDefault(), proposalsOpen ? closeProposals() : openProposals());
 });
 
 function connect() {

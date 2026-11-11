@@ -51,6 +51,8 @@ export interface Proposal {
   tickets?: string[];
   /** The instructions for the new session, in Chinese. */
   prompt: string;
+  /** What the user did: started a session for it, or dismissed it. Absent while open. */
+  status?: "started" | "dismissed";
 }
 
 export interface Report {
@@ -119,7 +121,15 @@ export function annotateReport(
 ): Report {
   const r = readReport(date);
   if (!r) throw new TicketError(`No report for ${date}; run \`ticketdeck report --save\` first.`);
-  if (proposals) r.proposals = proposals.slice(0, MAX_PROPOSALS).map((p, i) => proposal(p, i));
+  if (proposals) {
+    // A proposal written again keeps what the user already did with it.
+    const before = new Map((r.proposals ?? []).map((p) => [`${p.project}\n${p.title}`, p.status]));
+    r.proposals = proposals.slice(0, MAX_PROPOSALS).map((p, i) => {
+      const made = proposal(p, i);
+      const status = before.get(`${made.project}\n${made.title}`);
+      return status ? { ...made, status } : made;
+    });
+  }
   if (focus) r.focus = focus.slice(0, 3).map((f) => focusItem(f.project, f.id, f.reason));
   if (summary !== undefined) r.summary = summary.trim() || null;
   if (leftovers !== undefined) r.leftovers = leftovers;
@@ -288,7 +298,8 @@ Good proposals, most useful first:
 5. Repository leftovers: uncommitted changes, branches already merged, stale worktrees — tidy them up
    (commit or ticket the changes; delete only branches that are merged).
 Leave out: product or design decisions, anything needing credentials or money, today's 今日重点,
-tickets another session holds (status doing), and anything already proposed today unless it changed.
+tickets another session holds (status doing), and anything already proposed today unless it changed —
+in particular proposals the user dismissed or already started (their "status" in today's report).
 
 Each proposal is a JSON object:
   {"project": "<folder name>", "title": "<中文，像任务标题，≤ 25 字>", "why": "<中文理由，≤ 15 字>",
@@ -301,6 +312,19 @@ Write them all at once (this replaces today's proposals), from a file because pr
   ticketdeck report annotate --proposals @<file.json>
 If nothing is worth proposing, run \`ticketdeck report annotate --no-proposals\`.
 All text the user sees is Simplified Chinese; keep code, paths, ids and branch names as they are.`;
+
+/** Records what the user did with a proposal ("open" clears it). */
+export function setProposalStatus(date: string, id: string, status: "started" | "dismissed" | "open"): Proposal {
+  const r = readReport(date);
+  if (!r) throw new TicketError(`No report for ${date}.`);
+  const p = r.proposals?.find((x) => x.id === id);
+  if (!p) throw new TicketError(`No proposal ${id} in the report for ${date}.`);
+  if (status === "open") delete p.status;
+  else if (status === "started" || status === "dismissed") p.status = status;
+  else throw new TicketError(`Proposal status must be started, dismissed or open.`);
+  saveReport(r);
+  return p;
+}
 
 /** A short plain rendering for the terminal (`ticketdeck report`). */
 export const KIND_LABEL: Record<FocusItem["kind"], string> = { review: "待验收", decision: "待决策", action: "需你执行", push: "优先推进" };
@@ -320,7 +344,7 @@ export function reportText(r: Report): string {
   if (r.doing.length) out.push("", `进行中 · ${r.doing.length} 项`, ...r.doing.map((i) => line(i) + (i.stale ? "  （停滞）" : "")));
   if (r.totals.decisions) out.push("", `待决策与待执行 · ${r.totals.decisions} 项`, ...r.decisions.map(line));
   if (r.proposals?.length)
-    out.push("", `提议执行 · ${r.proposals.length} 项（同意后开新会话处理）`, ...r.proposals.map((p) => `  ${p.id} ${p.project} ${p.title}${p.why ? `  — ${p.why}` : ""}`));
+    out.push("", `提议执行 · ${r.proposals.length} 项（同意后开新会话处理）`, ...r.proposals.map((p) => `  ${p.id} ${p.project} ${p.title}${p.why ? `  — ${p.why}` : ""}${p.status === "started" ? "  [已开会话]" : p.status === "dismissed" ? "  [已忽略]" : ""}`));
   if (r.leftovers?.length) out.push("", `待纳入计划 · ${r.leftovers.length} 项（来自会话，尚未建任务）`, ...r.leftovers.map((l) => `  ${l.project} ${l.task}`));
   return out.join("\n") + "\n";
 }
